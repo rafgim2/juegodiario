@@ -42,7 +42,7 @@
   const name = (n, preferFlat=false) => (preferFlat && FLAT[((n%12)+12)%12]) || PC[((n%12)+12)%12];
   const noteName = n => name(n) + (Math.floor(n/12)-1);
   const midiActive = new Set(), testActive = new Set(), recent = new Map(), history = [];
-  let midiAccess=null, currentInput=null, lastChord=null, lastSignature='', commitTimer=null, audioCtx=null, sound=false;
+  let midiAccess=null, currentInput=null, lastChord=null, commitTimer=null, audioCtx=null, sound=false;
   let style='Pop';
   const templates = [
     {suffix:'', intervals:[0,4,7],quality:'major'}, {suffix:'m',intervals:[0,3,7],quality:'minor'},
@@ -143,18 +143,32 @@
   }
   function renderHistory(){const el=$('history');el.replaceChildren();if(!history.length){el.innerHTML='<span class="empty">Tu progresión aparecerá aquí.</span>';return;}for(const h of history.slice(-8)){const chip=document.createElement('span');chip.className='pill';chip.textContent=h.label;el.append(chip);}}
   function renderKey(){const k=estimateKey();$('estimatedKey').textContent=k?name(k.root,[3,5,8,10].includes(k.root))+' '+k.mode:'—';$('keyConfidence').textContent=k?k.confidence:'Esperando contexto';return k;}
-  function update(){
+  function update(considerChord=false){
     const active=allActive(), now=Date.now(), windowMs=+$('holdTime').value;
     for(const [n,t] of recent)if(now-t>windowMs)recent.delete(n);
     const gesture=[...new Set([...active,...recent.keys()])].sort((a,b)=>a-b);
-    const chord=analyse(gesture);lastChord=chord;
-    $('currentChord').textContent=chord?.label||'—';$('chordDetail').textContent=chord?.description||(active.length?'Añade otra nota para identificar el acorde.':'Toca varias notas para comenzar.');
+    const candidate=considerChord?analyse(gesture):null;
+    if(candidate){
+      const sameNotes=lastChord&&candidate.pcs.every(p=>lastChord.pcs.includes(p));
+      clearTimeout(commitTimer);
+      if(!sameNotes&&candidate.pcs.length>=3){
+        // La armonía solo cambia cuando las nuevas notas dejan de llegar.
+        // Repeticiones, octavas e inversiones con las mismas clases de nota
+        // mantienen el acorde y sus sugerencias estables.
+        commitTimer=setTimeout(()=>{
+          lastChord=candidate;
+          $('currentChord').textContent=candidate.label;
+          $('chordDetail').textContent=candidate.description;
+          commitChord(candidate);
+        },650);
+      }
+    }
+    if(!lastChord)$('chordDetail').textContent=active.length?'Toca al menos tres notas para identificar el acorde.':'Toca varias notas para comenzar.';
     const badges=$('activeNotes');badges.replaceChildren();for(const n of active){const span=document.createElement('span');span.className='pill';span.textContent=noteName(n);badges.append(span);}
     document.querySelectorAll('.key').forEach(k=>k.classList.toggle('active',active.includes(+k.dataset.note)));
-    const sig=chord?.label||'';if(sig!==lastSignature){lastSignature=sig;clearTimeout(commitTimer);if(chord)commitTimer=setTimeout(()=>commitChord(chord),240);}
-    const k=renderKey();renderSuggestions(chord||history[history.length-1]||null,k);
+    renderKey();
   }
-  function noteOn(n,source){if(n<21||n>108)return;const set=source==='midi'?midiActive:testActive;set.add(n);recent.set(n,Date.now());if(source==='test'&&sound)tone(n,.18);update();}
+  function noteOn(n,source){if(n<21||n>108)return;const set=source==='midi'?midiActive:testActive;set.add(n);recent.set(n,Date.now());if(source==='test'&&sound)tone(n,.18);update(true);}
   function noteOff(n,source){(source==='midi'?midiActive:testActive).delete(n);recent.set(n,Date.now());update();setTimeout(update,+$('holdTime').value+15);}
   function tone(n,duration=.45,delay=0){try{audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();const osc=audioCtx.createOscillator(),gain=audioCtx.createGain(),start=audioCtx.currentTime+delay;osc.type='triangle';osc.frequency.value=440*Math.pow(2,(n-69)/12);gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(.11,start+.018);gain.gain.exponentialRampToValueAtTime(.0001,start+duration);osc.connect(gain).connect(audioCtx.destination);osc.start(start);osc.stop(start+duration+.02);}catch(e){console.warn('Audio no disponible',e);}}
   function playChord(root,intervals){const base=48+root;intervals.forEach((d,i)=>tone(base+d,.7,i*.045));}
