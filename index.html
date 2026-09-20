@@ -160,7 +160,7 @@
           $('currentChord').textContent=candidate.label;
           $('chordDetail').textContent=candidate.description;
           commitChord(candidate);
-        },650);
+        },200);
       }
     }
     if(!lastChord)$('chordDetail').textContent=active.length?'Toca al menos tres notas para identificar el acorde.':'Toca varias notas para comenzar.';
